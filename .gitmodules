@@ -1,0 +1,3 @@
+[submodule "indi-pylibcamera"]
+	path = indi-pylibcamera
+	url = https://github.com/scriptorron/indi_pylibcamera/
