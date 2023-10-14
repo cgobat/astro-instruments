@@ -66,6 +66,7 @@ class PiHQCamera(Picamera2):
     
     def capture_hdu(self, crop=True) -> fits.PrimaryHDU:
         array, meta = self.capture_raw_array(metadata=True)
+        meta.pop("ColourCorrectionMatrix") # omit from further use
         print(f"\nCapture metadata:\n{meta}\n")
         raw_format = re.match(r"(S)(?P<bayer>[RGB]{4})(?P<bits>\d+)(_CSI2P)?", self.raw_format)
         bpp = int(raw_format.group("bits"))
@@ -87,6 +88,8 @@ class PiHQCamera(Picamera2):
         hdu.header.set("YPIXSIZE", self.camera_properties["UnitCellSize"][1]/1000, "[um] pixel height")
         hdu.header.set("BAYERPAT", bayer_order, "Bayer filter order/layout")
         hdu.header.set("BITDEPTH", bpp, "number of bits per pixel value")
+        hdu.header.set("DATAMIN", black_pt, "[DN] sensor black point")
+        hdu.header.set("DATAMAX", 2**bpp-1, f"[DN] maximum representable value with {bpp} bits")
         hdu.header.set("META-SEP", "-"*23+" OBSERVATION METADATA "+"-"*23)
         hdu.header.set("FRAMELUX", meta["Lux"], "[lx] estimated scene brightness/illuminance")
         hdu.header.set("COLORTMP", meta["ColourTemperature"], "[K] estimated average color temperature")
@@ -96,8 +99,6 @@ class PiHQCamera(Picamera2):
         hdu.header.set("DATE-END", sensortime_to_datetime(meta["SensorTimestamp"]).isoformat(),
                        "[ISO UTC] time of first pixel readout")
         hdu.header.set("EXPTIME", meta["ExposureTime"]/1e6, "[s] image exposure time")
-        hdu.header.set("DATAMIN", black_pt, "[DN] sensor black point")
-        hdu.header.set("DATAMAX", 2**bpp-1, f"[DN] maximum representable value with {bpp} bits")
         hdu.header.set("DATE", dt.datetime.utcnow().isoformat(), "[ISO UTC] time of HDU creation")
         hdu.header.set("PROGRAM", "AstroHQ by cgobat", "software that generated this file")
          
@@ -112,9 +113,9 @@ class PiHQCamera(Picamera2):
     def start_and_capture_fits(self, filename: str) -> None:
         self.start()
         throwaway = self.capture_metadata()
-        print("Initial metadata:", {kw: () if kw.endswith("CorrectionMatrix")
-                                        else sensortime_to_datetime(throwaway[kw]) if kw=="SensorTimestamp"
-                                        else throwaway[kw] for kw in throwaway})
+        throwaway.pop("ColourCorrectionMatrix")
+        throwaway["SensorTimestamp"] = sensortime_to_datetime(throwaway["SensorTimestamp"])
+        print("Initial metadata:", throwaway)
         self.capture_fits(filename)
         return
 
@@ -131,7 +132,9 @@ if __name__ == "__main__":
         hqcam.start_and_capture_fits(args.out_file)
     else:
         hqcam.start()
-        time.sleep(1)
+        throwaway = hqcam.capture_metadata()
+        throwaway.pop("ColourCorrectionMatrix")
+        print(f"\nInitial metadata:\n{throwaway}\n")
         for i in range(args.number):
             hqcam.capture_fits(args.out_file.format(i))
             print(f"Captured {args.out_file.format(i)}")
