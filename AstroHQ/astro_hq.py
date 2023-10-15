@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import psutil
 import argparse
 import time, datetime as dt
@@ -18,14 +19,24 @@ parser.add_argument("-n", "--number", type=int, default=1, help="number of frame
 
 class PiHQCamera(Picamera2):
 
+    base_tuning_file = "/usr/share/libcamera/ipa/rpi/vc4/imx477_scientific.json"
+
     def __init__(self) -> None:
-        super().__init__()
+        with open(self.base_tuning_file, "r") as tuning_file:
+            tuning_dict = json.load(tuning_file)
+        tuning_algorithms = list(map(lambda algo: list(algo.keys()).pop(), tuning_dict["algorithms"]))
+        tuning_dict["algorithms"][tuning_algorithms.index("rpi.dpc")]["rpi.dpc"] = {"strength": 0}
+        super().__init__(tuning=tuning_dict)
         self.configuration = self.create_still_configuration(transform=Transform(), #hflip=False, vflip=True),
+                                                             main={},
                                                              raw={"size": self.sensor_resolution,
                                                                   "format": self.sensor_format.replace("_CSI2P", "")},
                                                              controls={"AnalogueGain": 1.0, "ColourGains": (1., 1.),
                                                                        "AwbEnable": False, "AeEnable": False, "Sharpness": 0.,
                                                                        "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Off})
+        self.start()
+        print(f"Initial metadata:\n{self.capture_metadata()}")
+        self.stop()
     
     @property
     def raw_format(self) -> str:
@@ -97,9 +108,9 @@ class PiHQCamera(Picamera2):
         hdu.header.set("FOCUSFOM", meta["FocusFoM"], "image focus figure of merit")
         # hdu.header.set("UPTIME", meta["SensorTimestamp"]/1e9, "[s] system uptime since boot")
         hdu.header.set("CCD-TEMP", meta["SensorTemperature"], "[degC] sensor/detector temperature")
+        hdu.header.set("EXPTIME", meta["ExposureTime"]/1e6, "[s] image exposure time")
         hdu.header.set("DATE-END", sensortime_to_datetime(meta["SensorTimestamp"]).isoformat(),
                        "[ISO UTC] time of first pixel readout")
-        hdu.header.set("EXPTIME", meta["ExposureTime"]/1e6, "[s] image exposure time")
         hdu.header.set("DATE", dt.datetime.utcnow().isoformat(), "[ISO UTC] time of HDU creation")
         hdu.header.set("PROGRAM", "AstroHQ by cgobat", "software that generated this file")
          
@@ -113,20 +124,20 @@ class PiHQCamera(Picamera2):
     
     def start_and_capture_fits(self, filename: str) -> None:
         self.start()
-        throwaway = self.capture_metadata()
-        throwaway.pop("ColourCorrectionMatrix")
-        throwaway["SensorTimestamp"] = sensortime_to_datetime(throwaway["SensorTimestamp"])
-        print("Initial metadata:", throwaway)
+        # throwaway = self.capture_metadata()
+        # throwaway.pop("ColourCorrectionMatrix")
+        # throwaway["SensorTimestamp"] = sensortime_to_datetime(throwaway["SensorTimestamp"])
+        # print("Initial metadata:", throwaway)
         self.capture_fits(filename)
         return
 
 
 if __name__ == "__main__":
     print(f"Execution start: {dt.datetime.utcnow()} UTC")
-    print(f"LIBCAMERA_RPI_TUNING_FILE: {os.environ.get('LIBCAMERA_RPI_TUNING_FILE', '<not found>')}")
     args = parser.parse_args()
 
     hqcam = PiHQCamera()
+    print("LIBCAMERA_RPI_TUNING_FILE:", os.environ.get("LIBCAMERA_RPI_TUNING_FILE", "<not found>"))
     hqcam.exposure = args.exposure
     print("Configuration:")
     for kw, val in hqcam.configuration.items():
@@ -136,9 +147,9 @@ if __name__ == "__main__":
         hqcam.start_and_capture_fits(args.out_file)
     else:
         hqcam.start()
-        throwaway = hqcam.capture_metadata()
-        throwaway.pop("ColourCorrectionMatrix")
-        print(f"\nInitial metadata:\n{throwaway}\n")
+        # throwaway = hqcam.capture_metadata()
+        # throwaway.pop("ColourCorrectionMatrix")
+        # print(f"\nInitial metadata:\n{throwaway}\n")
         for i in range(args.number):
             hqcam.capture_fits(args.out_file.format(i))
             print(f"Captured {args.out_file.format(i)}")
