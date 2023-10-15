@@ -1,3 +1,4 @@
+import os
 import re
 import psutil
 import argparse
@@ -122,11 +123,14 @@ class PiHQCamera(Picamera2):
 
 if __name__ == "__main__":
     print(f"Execution start: {dt.datetime.utcnow()} UTC")
+    print(f"LIBCAMERA_RPI_TUNING_FILE: {os.environ.get('LIBCAMERA_RPI_TUNING_FILE', '<not found>')}")
     args = parser.parse_args()
 
     hqcam = PiHQCamera()
     hqcam.exposure = args.exposure
-    print("Configuration:", hqcam.configuration)
+    print("Configuration:")
+    for kw, val in hqcam.configuration.items():
+        print(f"  - {kw}: {val}")
 
     if args.number==1:
         hqcam.start_and_capture_fits(args.out_file)
