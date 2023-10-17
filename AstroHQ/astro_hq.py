@@ -13,25 +13,26 @@ BOOT_TIME = dt.datetime.utcfromtimestamp(psutil.boot_time())
 sensortime_to_datetime = lambda sensortime_ns: BOOT_TIME+dt.timedelta(microseconds=sensortime_ns/1e3)
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-t", "--exposure", type=float, default=1., help="exposure time in seconds")
-parser.add_argument("-o", "--out-file", type=str, default="test.fits", help="file name/path to save output FITS image")
-parser.add_argument("-n", "--number", type=int, default=1, help="number of frames to capture in sequence")
+parser.add_argument("-t", "--exposure", metavar="<seconds>", type=float, default=1., help="exposure time in seconds")
+parser.add_argument("-o", "--out-file", metavar="<path>", type=str, default="test.fits", help="file name/path to save output FITS image")
+parser.add_argument("-n", "--number", metavar="<#>", type=int, default=1, help="number of frames to capture in sequence")
+parser.add_argument("-g", "--gain", metavar="<setting>", type=float, default=1., help="analog gain setting (default=1.0)")
 
 class PiHQCamera(Picamera2):
 
     base_tuning_file = "/usr/share/libcamera/ipa/rpi/vc4/imx477_scientific.json"
 
-    def __init__(self) -> None:
+    def __init__(self, gain=1.0, dpc=False) -> None:
         with open(self.base_tuning_file, "r") as tuning_file:
             tuning_dict = json.load(tuning_file)
         tuning_algorithms = list(map(lambda algo: list(algo.keys()).pop(), tuning_dict["algorithms"]))
-        tuning_dict["algorithms"][tuning_algorithms.index("rpi.dpc")]["rpi.dpc"] = {"strength": 0}
+        tuning_dict["algorithms"][tuning_algorithms.index("rpi.dpc")]["rpi.dpc"] = {"strength": int(dpc)}
         super().__init__(tuning=tuning_dict)
         self.configuration = self.create_still_configuration(transform=Transform(), #hflip=False, vflip=True),
                                                              main={},
                                                              raw={"size": self.sensor_resolution,
                                                                   "format": self.sensor_format.replace("_CSI2P", "")},
-                                                             controls={"AnalogueGain": 1.0, "ColourGains": (1., 1.),
+                                                             controls={"AnalogueGain": gain, "ColourGains": (1., 1.),
                                                                        "AwbEnable": False, "AeEnable": False, "Sharpness": 0.,
                                                                        "NoiseReductionMode": controls.draft.NoiseReductionModeEnum.Off})
         self.start()
@@ -102,6 +103,7 @@ class PiHQCamera(Picamera2):
         hdu.header.set("BITDEPTH", bpp, "number of bits per pixel value")
         hdu.header.set("DATAMIN", black_pt, "[DN] sensor black point")
         hdu.header.set("DATAMAX", 2**bpp-1, f"[DN] maximum representable value with {bpp} bits")
+        hdu.header.set("GAIN", meta["AnalogueGain"], "analog gain setting")
         hdu.header.set("META-SEP", "-"*23+" OBSERVATION METADATA "+"-"*23)
         hdu.header.set("FRAMELUX", meta["Lux"], "[lx] estimated scene brightness/illuminance")
         hdu.header.set("COLORTMP", meta["ColourTemperature"], "[K] estimated average color temperature")
@@ -136,7 +138,7 @@ if __name__ == "__main__":
     print(f"Execution start: {dt.datetime.utcnow()} UTC")
     args = parser.parse_args()
 
-    hqcam = PiHQCamera()
+    hqcam = PiHQCamera(gain=args.gain)
     print("LIBCAMERA_RPI_TUNING_FILE:", os.environ.get("LIBCAMERA_RPI_TUNING_FILE", "<not found>"))
     hqcam.exposure = args.exposure
     print("Configuration:")
