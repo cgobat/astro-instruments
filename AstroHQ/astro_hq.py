@@ -20,11 +20,8 @@ parser.add_argument("-g", "--gain", metavar="<setting>", type=float, default=1.,
 
 class PiHQCamera(Picamera2):
 
-    base_tuning_file = "/usr/share/libcamera/ipa/rpi/vc4/imx477_scientific.json"
-
     def __init__(self, gain=1.0, dpc=False) -> None:
-        with open(self.base_tuning_file, "r") as tuning_file:
-            tuning_dict = json.load(tuning_file)
+        tuning_dict = self.load_tuning_file("imx477_scientific.json")
         tuning_algorithms = list(map(lambda algo: list(algo.keys()).pop(), tuning_dict["algorithms"]))
         tuning_dict["algorithms"][tuning_algorithms.index("rpi.dpc")]["rpi.dpc"] = {"strength": int(dpc)}
         super().__init__(tuning=tuning_dict)
@@ -63,6 +60,26 @@ class PiHQCamera(Picamera2):
     def exposure(self, set_val: float) -> None:
         self.controls.ExposureTime = round(set_val*1_000_000)
     
+    @staticmethod
+    def onboard_dpc_enabled() -> bool:
+        with open("/sys/module/imx477/parameters/dpc_enable", "r") as dpc_file:
+            status = dpc_file.read().strip()
+        if status == "1":
+            return True
+        elif status == "0":
+            return False
+        else:
+            raise ValueError(f"Unrecognized DPC status {status!r}")
+    
+    @classmethod
+    def pipeline_dpc_enabled(cls) -> bool:
+        tuning_file = os.environ.get("LIBCAMERA_RPI_TUNING_FILE")
+        if tuning_file is None:
+            raise FileNotFoundError("Environment variable LIBCAMERA_RPI_TUNING_FILE is not set.")
+        tuning_dict: dict = cls.load_tuning_file(os.path.basename(tuning_file), dir=os.path.dirname(tuning_file))
+        rpi_dpc_algo: dict = cls.find_tuning_algo(tuning_dict, "rpi.dpc")
+        return bool(rpi_dpc_algo.get("strength", 1)) # TODO: verify that default strength is indeed 1 if not set
+    
     def capture_raw_array(self, metadata=False) -> "np.ndarray|tuple[np.ndarray, dict]":
         print(f"Capture starting at  {dt.datetime.utcnow().isoformat()}")
         request = self.capture_request()
@@ -91,11 +108,14 @@ class PiHQCamera(Picamera2):
         print(f"Orig. array min/max: {array.min(), array.max()}")
         hdu = fits.PrimaryHDU(data=array[::-1, :].astype(np.uint16))
         hdu.header.set("BUNIT", "DN", "units of array values")
-        hdu.header.set("INST-SEP", "-"*19+" INSTRUMENT/CAMERA PROPERTIES "+"-"*19)
+        hdu.header.set("INST-SEP", "-"*19+" INSTRUMENT/OBSERVATORY INFO "+"-"*20)
         # hdu.header.set("FORMAT", raw_format, "configured camera format")
         hdu.header.set("INSTRUME", "Raspberry Pi HQ Camera Module", "camera name")
         hdu.header.set("TELESCOP", None, "telescope model/name")
         hdu.header.set("FOCALLEN", None, "[mm] telescope/lens focal length")
+        hdu.header.set("PROGRAM", "AstroHQ by cgobat", "instrument software that generated this HDU")
+        hdu.header.set("PLATFORM", self.platform, "platform architecture (0=VC4, 1=PISP)")
+        hdu.header.set("DET-SEP", "-"*22 + " DETECTOR CONFIGURATION " + "-"*22)
         hdu.header.set("DETECTOR", self.camera_properties["Model"].upper(), "camera sensor model")
         hdu.header.set("XPIXSIZE", self.camera_properties["UnitCellSize"][0]/1000, "[um] pixel width")
         hdu.header.set("YPIXSIZE", self.camera_properties["UnitCellSize"][1]/1000, "[um] pixel height")
@@ -104,6 +124,8 @@ class PiHQCamera(Picamera2):
         hdu.header.set("DATAMIN", black_pt, "[DN] sensor black point")
         hdu.header.set("DATAMAX", 2**bpp-1, f"[DN] maximum representable value with {bpp} bits")
         hdu.header.set("GAIN", meta["AnalogueGain"], "analog gain setting")
+        hdu.header.set("SENSRDPC", self.onboard_dpc_enabled(), "on-sensor defective pixel correction status")
+        hdu.header.set("RPI.DPC", self.pipeline_dpc_enabled(), "libcamera pipeline defective pixel correction status")
         hdu.header.set("META-SEP", "-"*23+" OBSERVATION METADATA "+"-"*23)
         hdu.header.set("FRAMELUX", meta["Lux"], "[lx] estimated scene brightness/illuminance")
         hdu.header.set("COLORTMP", meta["ColourTemperature"], "[K] estimated average color temperature")
@@ -113,8 +135,8 @@ class PiHQCamera(Picamera2):
         hdu.header.set("EXPTIME", meta["ExposureTime"]/1e6, "[s] image exposure time")
         hdu.header.set("DATE-END", sensortime_to_datetime(meta["SensorTimestamp"]).isoformat(),
                        "[ISO UTC] time of first pixel readout")
+        hdu.header.set("FILE-SEP", "-"*27 + " FILE METADATA " + "-"*26)
         hdu.header.set("DATE", dt.datetime.utcnow().isoformat(), "[ISO UTC] time of HDU creation")
-        hdu.header.set("PROGRAM", "AstroHQ by cgobat", "software that generated this file")
          
         hdu.add_checksum()
         return hdu
