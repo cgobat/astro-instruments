@@ -21,10 +21,10 @@ parser.add_argument("-g", "--gain", metavar="<setting>", type=float, default=1.,
 class PiHQCamera(Picamera2):
 
     def __init__(self, gain=1.0, dpc=False) -> None:
-        tuning_dict = self.load_tuning_file("imx477_scientific.json")
-        tuning_algorithms = list(map(lambda algo: list(algo.keys()).pop(), tuning_dict["algorithms"]))
-        tuning_dict["algorithms"][tuning_algorithms.index("rpi.dpc")]["rpi.dpc"] = {"strength": int(dpc)}
-        super().__init__(tuning=tuning_dict)
+        self.tuning_dict = self.load_tuning_file("imx477_scientific.json")
+        tuning_algorithms = list(map(lambda algo: list(algo.keys()).pop(), self.tuning_dict["algorithms"]))
+        self.tuning_dict["algorithms"][tuning_algorithms.index("rpi.dpc")]["rpi.dpc"] = {"strength": int(dpc)}
+        super().__init__(tuning=self.tuning_dict)
         self.configuration = self.create_still_configuration(transform=Transform(), #hflip=False, vflip=True),
                                                              main={},
                                                              raw={"size": self.sensor_resolution,
@@ -71,13 +71,15 @@ class PiHQCamera(Picamera2):
         else:
             raise ValueError(f"Unrecognized DPC status {status!r}")
     
-    @classmethod
-    def pipeline_dpc_enabled(cls) -> bool:
-        tuning_file = os.environ.get("LIBCAMERA_RPI_TUNING_FILE")
-        if tuning_file is None:
-            raise FileNotFoundError("Environment variable LIBCAMERA_RPI_TUNING_FILE is not set.")
-        tuning_dict: dict = cls.load_tuning_file(os.path.basename(tuning_file), dir=os.path.dirname(tuning_file))
-        rpi_dpc_algo: dict = cls.find_tuning_algo(tuning_dict, "rpi.dpc")
+    def pipeline_dpc_enabled(self) -> bool:
+        try:
+            tuning_file = os.environ["LIBCAMERA_RPI_TUNING_FILE"]
+            tuning: dict = self.load_tuning_file(os.path.basename(tuning_file), dir=os.path.dirname(tuning_file))
+        except KeyError:
+            raise FileNotFoundError("Environment var LIBCAMERA_RPI_TUNING_FILE is not set")
+        except RuntimeError:
+            tuning = self.tuning_dict
+        rpi_dpc_algo: dict = self.find_tuning_algo(tuning, "rpi.dpc")
         return bool(rpi_dpc_algo.get("strength", 1)) # TODO: verify that default strength is indeed 1 if not set
     
     def capture_raw_array(self, metadata=False) -> "np.ndarray|tuple[np.ndarray, dict]":
@@ -124,8 +126,8 @@ class PiHQCamera(Picamera2):
         hdu.header.set("DATAMIN", black_pt, "[DN] sensor black point")
         hdu.header.set("DATAMAX", 2**bpp-1, f"[DN] maximum representable value with {bpp} bits")
         hdu.header.set("GAIN", meta["AnalogueGain"], "analog gain setting")
-        hdu.header.set("SENSRDPC", self.onboard_dpc_enabled(), "on-sensor defective pixel correction status")
-        # hdu.header.set("RPI.DPC", self.pipeline_dpc_enabled(), "libcamera pipeline defective pixel correction status")
+        hdu.header.set("SONY_DPC", self.onboard_dpc_enabled(), "on-sensor defective pixel correction status")
+        hdu.header.set("RPI_DPC", self.pipeline_dpc_enabled(), "libcamera defective pixel correction status")
         hdu.header.set("META-SEP", "-"*23+" OBSERVATION METADATA "+"-"*23)
         hdu.header.set("FRAMELUX", meta["Lux"], "[lx] estimated scene brightness/illuminance")
         hdu.header.set("COLORTMP", meta["ColourTemperature"], "[K] estimated average color temperature")
