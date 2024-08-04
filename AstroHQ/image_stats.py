@@ -26,10 +26,13 @@ if __name__ == "__main__":
     clipped -= 256
     hist_vals, hist_bins = np.histogram(clipped, 40)
     hist_bins = np.mean([hist_bins[1:], hist_bins[:-1]], axis=0)
-    fit_params, cov = optimize.curve_fit(bimodal_norm_pdf, hist_bins, hist_vals, p0=[2e6, 16, 2, 1e6, 40, 10])
-    print("Fit parameters:")
-    for kw, i in zip(["A1", "μ1", "σ1", "A2", "μ2", "σ2"], [1, 2, 4, 5]):
-        print(f"  {kw}: {fit_params[i]:6.3f}")
+    try:
+        fit_params, cov = optimize.curve_fit(bimodal_norm_pdf, hist_bins, hist_vals, p0=[2e6, 16, 2, 1e6, 40, 10])
+        print("Fit parameters:")
+        for kw, i in zip(["A1", "μ1", "σ1", "A2", "μ2", "σ2"], [1, 2, 4, 5]):
+            print(f"  {kw}: {fit_params[i]:6.3f}")
+    except RuntimeError:
+        print("Curve fit did not converge.")
     plt.hist(clipped, 40)
     plt.plot(np.linspace(0, clipped.max(), 100), bimodal_norm_pdf(np.linspace(0, clipped.max(), 100), *fit_params))
     plt.ylim(0,)
