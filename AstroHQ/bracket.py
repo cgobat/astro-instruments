@@ -14,7 +14,7 @@ if __name__ == "__main__":
 
     for exp_time in np.linspace(args.start, args.stop, args.N, endpoint=True):
         camera.exposure = exp_time
-        camera.start_and_capture_fits(f"bracket_{exp_time:05.2f}s.fits")
+        camera.start_and_capture_fits(f"bracket_{exp_time:05.2f}s_gain{args.gain}.fits")
         camera.stop()
 
     camera.close()
