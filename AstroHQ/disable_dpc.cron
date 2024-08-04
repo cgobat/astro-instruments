@@ -1,0 +1,6 @@
+# The line below should be added to the root user's crontab to ensure
+# that the sensor-level defective pixel correction (DPC) algorithm is
+# disabled.
+#
+# m h  dom mon dow   command
+@reboot echo 0 > /sys/module/imx477/parameters/dpc_enable
