@@ -3,6 +3,7 @@ import re
 import json
 import psutil
 import argparse
+import subprocess
 import time, datetime as dt
 import numpy as np
 from astropy.io import fits
@@ -17,6 +18,11 @@ parser.add_argument("-t", "--exposure", metavar="<seconds>", type=float, default
 parser.add_argument("-o", "--out-file", metavar="<path>", type=str, default="test.fits", help="file name/path to save output FITS image")
 parser.add_argument("-n", "--number", metavar="<#>", type=int, default=1, help="number of frames to capture in sequence")
 parser.add_argument("-g", "--gain", metavar="<setting>", type=float, default=1., help="analog gain setting (default=1.0)")
+
+def get_cpu_temp() -> float:
+    proc = subprocess.run(["sensors", "-j"], text=True, capture_output=True)
+    sensors = json.loads(proc.stdout)
+    return sensors["cpu_thermal-virtual-0"]["temp1"]["temp1_input"]
 
 class PiHQCamera(Picamera2):
 
@@ -133,6 +139,7 @@ class PiHQCamera(Picamera2):
         hdu.header.set("COLORTMP", meta["ColourTemperature"], "[K] estimated average color temperature")
         hdu.header.set("FOCUSFOM", meta["FocusFoM"], "image focus figure of merit")
         # hdu.header.set("UPTIME", meta["SensorTimestamp"]/1e9, "[s] system uptime since boot")
+        hdu.header.set("CPU-TEMP", get_cpu_temp(), "[degC] processor/CPU temperature")
         hdu.header.set("CCD-TEMP", meta["SensorTemperature"], "[degC] sensor/detector temperature")
         hdu.header.set("EXPTIME", meta["ExposureTime"]/1e6, "[s] image exposure time")
         hdu.header.set("DATE-END", sensortime_to_datetime(meta["SensorTimestamp"]).isoformat(),
